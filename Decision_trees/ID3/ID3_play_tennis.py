@@ -122,7 +122,7 @@ def build_tree(df, target_name, available_features):
         # Filter the DataFrame to ONLY rows that match this category
         subset_df = df[df[best_feature] == category]
         
-        # MAGIC HAPPENS HERE: We call THIS EXACT FUNCTION again, but we feed it
+        # MAGIC: We call THIS EXACT FUNCTION again, but we feed it
         # the smaller subset_df and the remaining_features list!
         branch_result = build_tree(subset_df, target_name, remaining_features)
         
