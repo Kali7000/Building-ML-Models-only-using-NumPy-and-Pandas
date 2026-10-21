@@ -65,7 +65,7 @@ def build_tree(df, avilable_features, target, max_depth = 5, current_depth = 0):
     if len(left_df) == 0 or len(right_df) == 0:
         return np.mean(df[target])
     
-    #recursion
+    #Recursion
     tree = {'feature':best_feature,
             'threshold': best_threshold,
             'left': build_tree(left_df,avilable_features,target,max_depth,current_depth+1),
