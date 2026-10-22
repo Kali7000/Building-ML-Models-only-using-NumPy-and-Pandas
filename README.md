@@ -101,7 +101,7 @@ This repository is a transparent exploration of how these algorithms actually le
 
 | Project | What it covers |
 |---|---|
-| [K-fold cross validation](K-Fold%20cross%20Validation) | Splitting data into folds to estimate how well a model generalizes |
+| [Stratified k-fold cross validation](K-Fold%20cross%20Validation) | A custom stratified k-fold engine: splits data into folds that preserve class proportions, to estimate how well a model generalizes |
 
 ---
 
@@ -188,5 +188,4 @@ This is a personal learning project, but suggestions and corrections are welcome
 Everything here is educational. The stock-related project is a study of methodology, not financial advice or a trading strategy.
 
 ## Author
-
 **Vishal Wagh**, [GitHub](https://github.com/kali7000) · LinkedIn: https://www.linkedin.com/in/wagh0/
