@@ -165,20 +165,6 @@ Datasets sit in the same folder as the script that uses them. Many scripts load 
 
 ---
 
-## Roadmap
-
-New projects are added over time. Ideas I'm considering:
-
-- Gradient-boosted trees
-- k-nearest neighbors and k-means clustering
-- Naive Bayes
-- Neural network built from scratch with backpropagation
-- PCA
-
-*(Edit this list to match your real plans.)*
-
----
-
 ## Contributing and feedback
 
 This is a personal learning project, but suggestions and corrections are welcome. If you spot a bug, a confusing explanation, or a better way to do something, please open an issue or a pull request.
