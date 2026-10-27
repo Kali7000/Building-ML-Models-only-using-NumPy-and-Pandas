@@ -8,9 +8,6 @@ Created on Tue Oct 20 23:28:41 2026
 import pandas as pd
 import numpy as np
 import random
-
-
-
 def calulate_weigheted_mse(left, right):
     n_left = len(left)
     n_right = len(right)
@@ -44,7 +41,7 @@ def split_finder(df, avilable_features, target_col):
     return best_feature, best_threshold, best_MSE
     
 
-def build_tree(df, available_features, target, max_depth,feature_fraction=4.0, current_depth = 0):
+def build_tree(df, available_features, target, max_depth,feature_fraction=0.4, current_depth = 0):
     #Base conditions to stop the loop    
     if len(df)<15 or current_depth >= max_depth or len(available_features) == 0:
         return np.mean(df[target])
@@ -93,7 +90,7 @@ def predict_row(tree,row):
 
 
 class RandomForestRegressor:
-    def __init__(self, n_trees = 50, max_depth = 9, min_samples = 15, feature_fraction=0.4):
+    def __init__(self, n_trees = 70, max_depth = 12, min_samples = 9, feature_fraction=0.33):
         self.n_trees = n_trees
         self.max_depth = max_depth
         self.min_samples = min_samples
@@ -158,9 +155,8 @@ if __name__ == "__main__":
     test_df = daily_df[train_len:]
     target_col = 'cnt'
 
-    print("\nBuilding the Tree...")
     # Create the model
-    rf = RandomForestRegressor(n_trees=50, max_depth=6, feature_fraction=0.6)
+    rf = RandomForestRegressor(n_trees = 50, max_depth = 4, min_samples = 50, feature_fraction=0.33)
     # Train the forest
     rf.fit(train_df, target_col)
     

@@ -72,6 +72,136 @@ p = rf.predict(X_test)        # one predicted return per test day
 
 ---
 
+## Customizing the setup: other horizons and other tickers
+
+The forest code (`best_split`, `build_tree`, `predict_row`, `RandomForestRegressor`) does not change. Only the data-prep block in `__main__` does.
+
+### A. Predict more than one day ahead
+
+Change the shift in the target, and drop **as many rows from the end of train as the horizon**, because the label of row *t* reaches *H* days forward and would otherwise overlap the test period.
+
+```python
+HORIZON = 5   # 1 = tomorrow, 2 = two days ahead, 5 = about one trading week
+
+target = pd.DataFrame({'y': close.shift(-HORIZON) / close - 1})
+data = pd.concat([features, target], axis=1).dropna()   # also drops the last HORIZON rows
+
+split = int(len(data) * 0.8)
+train = data.iloc[:split - HORIZON]    # gap = HORIZON rows
+test  = data.iloc[split:]
+
+cols = list(features.columns)
+X_train, X_test = train[cols].values, test[cols].values
+Y_train, Y_test = train['y'].values, test['y'].values
+```
+
+To train several horizons in one run (one forest per horizon):
+
+```python
+for h in [1, 2, 5]:
+    y = (close.shift(-h) / close - 1).rename('y')
+    data = pd.concat([features, y], axis=1).dropna()
+    split = int(len(data) * 0.8)
+    train, test = data.iloc[:split - h], data.iloc[split:]
+
+    X_train, Y_train = train[cols].values, train['y'].values
+    X_test,  Y_test  = test[cols].values,  test['y'].values
+
+    rf = RandomForestRegressor(n_trees=100, max_depth=4, min_leaf=40,
+                               feature_fraction=0.33, seed=42)
+    rf.fit(X_train, Y_train)
+    p = rf.predict(X_test)
+
+    print(f"h={h}  forest MSE {mse(Y_test, p):.2e}  baseline MSE {mse(Y_test, Y_train.mean()):.2e}  "
+          f"dir acc {dir_acc(Y_test, p):.3f}  always-up {dir_acc(Y_test, np.ones(len(Y_test))):.3f}")
+```
+
+**What changes when the horizon grows**
+
+- **Overlapping labels.** With `H > 1`, neighboring rows share most of their return window (the 5-day returns of Monday and Tuesday overlap by 4 days). Rows are even less independent than before, so the effective sample size is smaller and the test result is less trustworthy than the row count suggests.
+- **MSE grows with the horizon.** Return variance scales roughly with the number of days, so a 5-day MSE is not comparable to a 1-day MSE. Only compare the forest to the baseline **at the same horizon**.
+- **The always-up baseline changes.** Longer windows have a higher share of positive returns, so recompute it per horizon rather than reusing 56%.
+- **Features may need longer lookbacks.** For `H = 5` or more, consider adding `ret_20`, `ret_60` and a longer volatility window.
+
+### B. Use a different stock or asset type
+
+Change the ticker passed to `yf.download`. Any symbol that works on Yahoo Finance works here.
+
+```python
+TICKER = "AAPL"
+raw = yf.download(TICKER, start="2010-01-01", auto_adjust=True)
+```
+
+| Asset type | Example tickers | Notes |
+|---|---|---|
+| Individual stocks | `AAPL`, `MSFT`, `JPM`, `XOM` | Noisier than SPY (single-company news), so expect higher variance. |
+| ETFs | `SPY`, `QQQ`, `IWM`, `GLD`, `TLT` | Very liquid and clean. |
+| Indices | `^GSPC`, `^IXIC`, `^VIX` | Not tradable directly. `^VIX` is a volatility level, not a price, so returns behave differently. |
+| Crypto | `BTC-USD`, `ETH-USD` | Trades 7 days a week (about 365 rows per year), and history starts around 2014, so adjust `start`. A "10-day window" now covers fewer calendar days. |
+| Forex | `EURUSD=X` | Volume is usually 0 or missing, so skip any volume-based feature such as `vol_ratio`. |
+| Futures | `GC=F` (gold), `CL=F` (crude oil) | Continuous-contract data can contain roll jumps. |
+
+**Things to check when switching assets**
+
+- **History length:** if the symbol started trading after your `start` date, you simply get fewer rows. Print `data.shape` and make sure the test set is still a few hundred rows.
+- **Volume:** if you use `vol_ratio` and volume can be 0, you get `inf` or `NaN`. Drop that feature for those assets.
+- **Compare against that asset's own baselines.** A MSE of 8e-05 means nothing for BTC, whose daily moves are several times larger than SPY's.
+- **Check the column handling:** `raw.columns.get_level_values(0)` is needed for a single ticker with newer `yfinance`. Download tickers **one at a time** in a loop, not as a list, so the columns stay simple.
+
+### C. Pool several tickers for more training data
+
+Build features **per ticker** (so rolling windows never cross from one stock into another), then stack the results. Use a single **date cutoff** for the split, so no ticker's training period overlaps another ticker's test period (stocks move together on the same days, which would otherwise leak).
+
+```python
+def build_dataset(ticker, horizon=1, start="2010-01-01"):
+    raw = yf.download(ticker, start=start, auto_adjust=True, progress=False)
+    raw.columns = raw.columns.get_level_values(0)
+    raw = raw.sort_index()
+    close = raw['Close']
+
+    df = pd.DataFrame(index=raw.index)
+    df['ret_1']    = close.pct_change(1)
+    df['ret_2']    = close.pct_change(2)
+    df['ret_5']    = close.pct_change(5)
+    df['ret_10']   = close.pct_change(10)
+    df['vol_10']   = close.pct_change().rolling(10).std()
+    df['ma_ratio'] = close / close.rolling(20).mean()
+    df['y']        = close.shift(-horizon) / close - 1
+    df['ticker']   = ticker
+    return df.dropna()
+
+
+TICKERS = ["SPY", "AAPL", "MSFT", "JPM", "XOM"]
+HORIZON = 1
+
+all_data = pd.concat([build_dataset(t, HORIZON) for t in TICKERS]).sort_index()
+
+dates  = all_data.index.unique().sort_values()
+cutoff = dates[int(len(dates) * 0.8)]                    # first test date
+gap    = dates[int(len(dates) * 0.8) - HORIZON]          # drop HORIZON dates before the cutoff
+
+train = all_data[all_data.index < gap]
+test  = all_data[all_data.index >= cutoff]
+
+cols = [c for c in all_data.columns if c not in ('y', 'ticker')]
+X_train, X_test = train[cols].values, test[cols].values
+Y_train, Y_test = train['y'].values, test['y'].values
+```
+
+Notes for pooled runs:
+
+- Training takes several times longer (about 5x the rows). Start with `n_trees=10`.
+- Pool assets that share a trading calendar. Mixing crypto (7 days a week) with stocks (5 days) breaks the "drop `HORIZON` rows" gap logic.
+- Different stocks have different volatility, so evaluate per ticker too:
+
+```python
+for t in TICKERS:
+    m = (test['ticker'] == t).values
+    print(t, mse(Y_test[m], p[m]), mse(Y_test[m], Y_train.mean()))
+```
+
+---
+
 ## How it works
 
 | Piece | What it does |
@@ -214,3 +344,20 @@ An earlier run with small leaves gave a similar picture (MSE 8.68e-05, direction
 - Standard bootstrapping resamples individual days and ignores that neighboring days are correlated.
 - No transaction costs or backtest, so direction accuracy says nothing about profitability.
 - Fundamentals are excluded because `yfinance` does not provide point-in-time values, and using restated figures would leak the future.
+
+## Ideas for next steps
+
+1. Run the seed-stability check and report mean and spread across seeds.
+2. Tune `min_leaf`, `max_depth` and `feature_fraction` on a validation slice.
+3. Add features: volume ratio (`volume / volume.rolling(20).mean()`), RSI, 20-day return, day of week.
+4. Report metrics per sub-period (e.g. 2-3 blocks of the test set).
+5. Add a 2-day-ahead target and compare difficulty.
+6. Pool several tickers (AAPL, MSFT, JPM, XOM) for more rows.
+7. Add permutation feature importance (shuffle one column in the test set and measure the rise in MSE).
+8. Run a simple backtest (long when the prediction is positive, cash otherwise) with transaction costs against buy-and-hold.
+9. Sanity-check against scikit-learn's `RandomForestRegressor` on the same split.
+10. Try block bootstrapping, which resamples chunks of consecutive days.
+
+## Disclaimer
+
+This is an educational project. Nothing here is financial advice or a trading strategy.
